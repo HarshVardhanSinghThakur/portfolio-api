@@ -133,6 +133,7 @@ function readJson(req: IncomingMessage, limit = 2048): Promise<unknown> {
 async function stream(req: IncomingMessage, res: ServerResponse) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.write('retry: 3000\n\n')
+  res.write(sse('ping', { now: Date.now() })) // lets the browser measure how far its clock is from ours
   for (const e of recent.slice(-5)) res.write(sse('log', e))
   clients.add(res)
   req.on('close', () => {
@@ -201,6 +202,6 @@ const server = createServer(async (req, res) => {
 
 cluster.start(pushLog)
 setInterval(() => void tick(), 2000)
-setInterval(() => broadcast('ping', {}), 15_000).unref()
+setInterval(() => broadcast('ping', { now: Date.now() }), 15_000).unref()
 server.listen(PORT, () => console.log(`portfolio-api on :${PORT} (${process.env.CLUSTER === 'fake' ? 'fake cluster' : 'kubernetes'})`))
 process.on('SIGTERM', () => server.close(() => process.exit(0)))
