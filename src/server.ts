@@ -82,7 +82,7 @@ async function snapshot(): Promise<Snapshot> {
   } catch (e) {
     visits = { ok: false, error: friendlyError(e) }
   }
-  return { simulated: process.env.CLUSTER === 'fake', status: cluster.status(), metrics: cluster.metrics(), visits, viewers: clients.size, destroy: guard() }
+  return { simulated: process.env.CLUSTER === 'fake', status: cluster.status(), metrics: cluster.metrics(), pods: cluster.pods(), visits, viewers: clients.size, destroy: guard() }
 }
 
 let lastJson = ''

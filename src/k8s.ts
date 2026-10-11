@@ -1,6 +1,7 @@
 import * as k8s from '@kubernetes/client-node'
+import { podInfo } from './pods.ts'
 import { parseProm, summarize } from './prom.ts'
-import type { Cluster, DbStatus, LogLine, Metrics, Phase, VisitStore } from './types.ts'
+import type { Cluster, DbStatus, LogLine, Metrics, Phase, PodInfo, VisitStore } from './types.ts'
 
 const GROUP = 'db.harshdev.io'
 const VERSION = 'v1'
@@ -16,6 +17,7 @@ export class K8sCluster implements Cluster {
   private apps: k8s.AppsV1Api
   private st: DbStatus
   private m: Metrics = EMPTY
+  private podList: PodInfo[] = []
   private log: (l: LogLine) => void = () => {}
   private seenEvents: Set<string> | null = null
   private lastReconciles: number | null = null
@@ -65,6 +67,10 @@ export class K8sCluster implements Cluster {
     return this.m
   }
 
+  pods() {
+    return this.podList
+  }
+
   async destroy() {
     await this.core.deleteNamespacedPersistentVolumeClaim({ name: `${this.name}-data`, namespace: this.ns })
     // The volume is protected while a pod uses it, so remove the pod too; the StatefulSet recreates it.
@@ -98,7 +104,22 @@ export class K8sCluster implements Cluster {
     if (phase === 'Running' && (!podReady || pvcGone)) phase = 'Degraded'
 
     this.st = { name, namespace: ns, phase, lastBackup: crStatus.lastBackup ?? null, backupCount: crStatus.backupCount ?? 0 }
+    this.podList = await this.listPods().catch((e) => {
+      console.warn('pod list failed:', (e as Error).message) // most likely the Role lacks pods list: reapply k8s/portfolio-api.yaml
+      return []
+    })
     await this.pullEvents()
+  }
+
+  // The same table `kubectl get pods` prints. Finished Job pods (old backups, past restores) pile up,
+  // so ones that completed over half an hour ago are left out.
+  private async listPods() {
+    const stale = Date.now() - 30 * 60_000
+    const list = await this.core.listNamespacedPod({ namespace: this.ns })
+    return list.items
+      .map(podInfo)
+      .filter((p) => !(p.status === 'Completed' && p.createdAt < stale))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }
 
   // Events the operator posts (drift healed, data loss detected, auto-restore) become the live feed.

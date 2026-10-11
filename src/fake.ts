@@ -1,4 +1,6 @@
-import type { Cluster, DbStatus, LogLine, Metrics, Phase, VisitStore } from './types.ts'
+import type { Cluster, DbStatus, LogLine, Metrics, Phase, PodInfo, VisitStore } from './types.ts'
+
+const pod = (name: string, status: string, ageMs: number, ready = '1/1'): PodInfo => ({ name, ready, status, createdAt: Date.now() - ageMs })
 
 // A stand-in for the real operator so the whole site can be developed and tested without
 // a cluster. Messages mirror what the operator logs. Deleting wipes the visit table and a
@@ -15,6 +17,10 @@ export class FakeCluster implements Cluster {
   private recoverySecs: number[] = []
   private log: (l: LogLine) => void = () => {}
   private timers: ReturnType<typeof setTimeout>[] = []
+  // the pods `kubectl get pods` would list: three that never change, plus the database pod and the restore Job pod
+  private others = [pod('portfolio-api-6d8f7c9b5-x2k4q', 'Running', 3_600_000), pod('portfolio-site-5c7b8d6f4-m9p2w', 'Running', 3_600_000), pod('postgres-operator-7977fc4b55-smvvk', 'Running', 7_200_000)]
+  private dbPod: PodInfo | null = pod('demo-db-0', 'Running', 600_000)
+  private restorePod: PodInfo | null = null
   // exported so the server can read a single namespace/name pair
   readonly name = 'demo-db'
   readonly namespace = 'portfolio'
@@ -66,20 +72,36 @@ export class FakeCluster implements Cluster {
     }
   }
 
+  pods() {
+    return [...this.others, this.dbPod, this.restorePod].filter((p) => p !== null).sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   async destroy() {
     const t0 = Date.now()
     const later = (ms: number, fn: () => void) => this.timers.push(setTimeout(fn, ms))
     this.phase = 'Degraded'
     this.rows = []
+    if (this.dbPod) this.dbPod = { ...this.dbPod, ready: '0/1', status: 'Terminating' }
     this.log({ level: 'error', text: `pvc/${this.name}-data deleted` })
+    later(700, () => (this.dbPod = null))
     later(1300, () => this.log({ level: 'warn', text: 'PVC UID changed: data loss detected' }))
-    later(2600, () => this.log({ level: 'warn', text: `auto-restore: PostgresRestore ${this.name}-auto created (backupFile=latest)` }))
+    // no pod at all until the operator has recreated the volume (about a reconcile interval), like the real cluster
+    later(2600, () => {
+      this.dbPod = pod('demo-db-0', 'Pending', 0, '0/1')
+      this.log({ level: 'warn', text: `auto-restore: PostgresRestore ${this.name}-auto created (backupFile=latest)` })
+    })
+    later(3200, () => {
+      if (this.dbPod) this.dbPod = { ...this.dbPod, status: 'ContainerCreating' }
+    })
     later(3800, () => {
       this.phase = 'Restoring'
+      if (this.dbPod) this.dbPod = { ...this.dbPod, ready: '1/1', status: 'Running' }
+      this.restorePod = pod('demo-db-auto-restore-x7k2p', 'Running', 0, '0/1')
       this.log({ level: 'info', text: `restore Job ${this.name}-auto-restore started` })
     })
     later(6600, () => this.log({ level: 'info', text: 'gunzip | psql: restoring from newest backup' }))
     later(9000, () => {
+      if (this.restorePod) this.restorePod = { ...this.restorePod, status: 'Completed' }
       this.rows = [...this.backupRows]
       this.log({ level: 'info', text: `restore finished: ${this.rows.length} visits recovered` })
     })

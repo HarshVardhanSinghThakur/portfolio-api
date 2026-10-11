@@ -31,10 +31,20 @@ export interface DestroyGuard {
   cooldownSec?: number
 }
 
+// One row of `kubectl get pods`. Age is not sent: the browser derives it from createdAt, so a quiet
+// cluster produces identical snapshots and nothing is broadcast.
+export interface PodInfo {
+  name: string
+  ready: string // "1/1"
+  status: string // Running, Pending, ContainerCreating, Terminating, Completed, CrashLoopBackOff, ...
+  createdAt: number // epoch ms
+}
+
 export interface Snapshot {
   simulated: boolean
   status: DbStatus
   metrics: Metrics
+  pods: PodInfo[]
   visits: VisitStats
   viewers: number
   destroy: DestroyGuard
@@ -51,6 +61,7 @@ export interface Cluster {
   start(onLog: (line: LogLine) => void): void
   status(): DbStatus
   metrics(): Metrics
+  pods(): PodInfo[]
   destroy(): Promise<void>
   visits: VisitStore
 }

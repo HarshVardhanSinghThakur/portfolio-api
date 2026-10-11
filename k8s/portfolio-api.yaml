@@ -35,6 +35,10 @@ rules:
     resources: ["pods"]
     resourceNames: ["demo-db-0"]
     verbs: ["delete"]
+  # Read-only list of pod names and states, shown on the site as `kubectl get pods`. A list cannot be limited by name.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
