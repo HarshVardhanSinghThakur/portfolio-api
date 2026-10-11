@@ -1,0 +1,21 @@
+{
+  "name": "portfolio-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/dev.ts",
+    "start": "node src/server.ts",
+    "test": "node --test src/prom.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^2.0.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}

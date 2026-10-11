@@ -1,0 +1,22 @@
+# dependencies (rebuilt by `npm ci` in the Docker image)
+node_modules/
+
+# secrets and local config; the real database password never lives in git, the operator generates it in-cluster
+.env
+.env.*
+!.env.example
+
+# logs, caches, archives
+*.log
+coverage/
+*.tgz
+
+# editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# tool output that can contain a work email or usage data: never commit
+.codemie/
+docs/codemie/

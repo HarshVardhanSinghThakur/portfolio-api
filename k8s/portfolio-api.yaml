@@ -1,0 +1,112 @@
+# Install order and commands: see the deployment runbook (operator first, then demo-db, then this file, then ../portfolio-site/k8s/site.yaml).
+# Everything lives in ONE namespace (portfolio) because the operator only watches its own.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portfolio-api
+  namespace: portfolio
+---
+# Least privilege: it can read the demo database and delete exactly two named objects, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: portfolio-api
+  namespace: portfolio
+rules:
+  - apiGroups: ["db.harshdev.io"]
+    resources: ["managedpostgres"]
+    resourceNames: ["demo-db"]
+    verbs: ["get"]
+  - apiGroups: ["db.harshdev.io"]
+    resources: ["postgresrestores"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["demo-db"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["demo-db-data"]
+    verbs: ["get", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["demo-db-0"]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: portfolio-api
+  namespace: portfolio
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: portfolio-api
+subjects:
+  - kind: ServiceAccount
+    name: portfolio-api
+    namespace: portfolio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-api
+  namespace: portfolio
+spec:
+  replicas: 1 # keep at 1: the event stream, cooldown and rate limits live in memory
+  selector:
+    matchLabels: { app: portfolio-api }
+  template:
+    metadata:
+      labels: { app: portfolio-api }
+    spec:
+      serviceAccountName: portfolio-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: api
+          image: portfolio-api:dev1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8787
+          env:
+            - name: NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: DB_NAME
+              value: demo-db
+            - name: TRUST_PROXY
+              value: "1"
+            - name: PGHOST
+              value: demo-db
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: demo-db-credentials, key: POSTGRES_USER } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: demo-db-credentials, key: POSTGRES_PASSWORD } }
+            - name: PGDATABASE
+              valueFrom: { secretKeyRef: { name: demo-db-credentials, key: POSTGRES_DB } }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8787 }
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8787 }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 300m, memory: 192Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-api
+  namespace: portfolio
+spec:
+  selector: { app: portfolio-api }
+  ports:
+    - port: 80
+      targetPort: 8787

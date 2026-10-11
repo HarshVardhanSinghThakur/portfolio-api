@@ -1,0 +1,15 @@
+# The database the site depends on. Backs up every 5 minutes, so a deletion loses at most ~5 minutes of visits.
+apiVersion: db.harshdev.io/v1
+kind: ManagedPostgres
+metadata:
+  name: demo-db
+  namespace: portfolio
+spec:
+  version: "16"
+  storage: 1Gi
+  backupEnabled: true
+  backupSchedule: "*/5 * * * *"
+  backupBackend: local
+  backupRetentionDays: 1
+  backupStorage: 1Gi
+  autoRestore: true
