@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/dev.ts",
     "start": "node src/server.ts",
-    "test": "node --test src/prom.test.ts src/pods.test.ts",
+    "test": "node --test src/prom.test.ts src/pods.test.ts src/cors.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

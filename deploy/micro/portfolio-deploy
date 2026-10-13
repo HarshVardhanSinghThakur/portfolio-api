@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Rolls out one part of the stack on the small Oracle VM. Install it as /usr/local/bin/portfolio-deploy.
+#
+#   portfolio-deploy api <sha>        portfolio-api at that commit (also applies the demo database definition)
+#   portfolio-deploy operator <sha>   the operator + its backup image at that commit (CRDs, then Helm)
+#
+# CI calls it over SSH with a key that is locked to this script (a "forced command" in authorized_keys), so
+# the command line arrives in SSH_ORIGINAL_COMMAND. Whatever it contains, only the two forms above are accepted.
+set -euo pipefail
+
+valid() { [[ "$1" =~ ^(api|operator)$ && "$2" =~ ^[0-9a-f]{7,40}$ ]]; }
+
+if [[ $EUID -ne 0 ]]; then
+  read -r component sha extra <<<"${SSH_ORIGINAL_COMMAND:-}"
+  if [[ -n "${extra:-}" ]] || ! valid "${component:-}" "${sha:-}"; then
+    echo "refused: use 'api <sha>' or 'operator <sha>'" >&2
+    exit 2
+  fi
+  exec sudo -n "$0" "$component" "$sha"
+fi
+
+valid "${1:-}" "${2:-}" || { echo "refused: use 'api <sha>' or 'operator <sha>'" >&2; exit 2; }
+component=$1
+sha=$2
+
+exec 9>/var/lock/portfolio-deploy.lock
+flock 9 # one rollout at a time
+
+source /etc/portfolio.env # OWNER (GitHub user, lowercase) and SITE_DOMAIN
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+STACK=/opt/stack
+
+# Manifests must match the commit the image was built from, so check out exactly that commit.
+checkout() {
+  git -C "$STACK/$1" fetch --quiet origin
+  git -C "$STACK/$1" checkout --quiet --detach "$2"
+}
+
+kubectl create namespace portfolio --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+case "$component" in
+  api)
+    checkout portfolio-api "$sha"
+    kubectl apply -f "$STACK/portfolio-api/k8s/demo-db.yaml"
+    kubectl kustomize "$STACK/portfolio-api/deploy/micro" \
+      | sed -e "s#image: portfolio-api:dev1#image: ghcr.io/$OWNER/portfolio-api:$sha#" -e "s#SITE_DOMAIN#$SITE_DOMAIN#g" \
+      | kubectl apply -f -
+    kubectl -n portfolio rollout status deploy/portfolio-api --timeout=240s
+    ;;
+  operator)
+    checkout postgres-operator "$sha"
+    kubectl apply -f "$STACK/postgres-operator/crds/"
+    helm upgrade --install postgres-operator "$STACK/postgres-operator/helm/postgres-operator" -n portfolio \
+      -f "$STACK/portfolio-api/deploy/micro/operator-values.yaml" \
+      --set image.repository="ghcr.io/$OWNER/postgres-operator" --set image.tag="$sha" \
+      --set backup.image="ghcr.io/$OWNER/postgres-backup:$sha"
+    # Helm does not touch a CronJob the operator already created. Deleting it makes the operator recreate it
+    # (within one reconcile interval) with the new backup image.
+    kubectl -n portfolio delete cronjob demo-db-backup --ignore-not-found
+    kubectl -n portfolio rollout status deploy/postgres-operator --timeout=240s
+    ;;
+esac
+echo "deployed $component $sha"

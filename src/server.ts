@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { corsHeaders, parseOrigins } from './cors.ts'
 import { FakeCluster } from './fake.ts'
 import { K8sCluster } from './k8s.ts'
 import type { Cluster, DestroyGuard, LogLine, Snapshot, VisitStats } from './types.ts'
@@ -8,6 +9,8 @@ import { friendlyError, pgVisits } from './visits.ts'
 const PORT = Number(process.env.PORT ?? 8787)
 const COOLDOWN_MS = Number(process.env.DESTROY_COOLDOWN_SEC ?? 300) * 1000
 const TRUST_PROXY = process.env.TRUST_PROXY === '1'
+// Origins allowed to call this API from a browser, e.g. "https://harsh.me,https://www.harsh.me". Empty = same-origin only.
+const ORIGINS = parseOrigins(process.env.ALLOWED_ORIGINS)
 const HOUR = 3_600_000
 
 function makeCluster(): Cluster {
@@ -136,6 +139,7 @@ async function stream(req: IncomingMessage, res: ServerResponse) {
   res.write(sse('ping', { now: Date.now() })) // lets the browser measure how far its clock is from ours
   for (const e of recent.slice(-5)) res.write(sse('log', e))
   clients.add(res)
+  cluster.wake?.()
   req.on('close', () => {
     clients.delete(res)
     void tick()
@@ -181,6 +185,8 @@ async function destroy(req: IncomingMessage, res: ServerResponse) {
 
 const server = createServer(async (req, res) => {
   const route = `${req.method} ${new URL(req.url ?? '/', 'http://localhost').pathname}`
+  for (const [k, v] of Object.entries(corsHeaders(req.headers.origin, ORIGINS))) res.setHeader(k, v)
+  if (req.method === 'OPTIONS') return void res.writeHead(204).end() // the browser's permission check before a POST
   try {
     switch (route) {
       case 'GET /api/health':
@@ -200,7 +206,7 @@ const server = createServer(async (req, res) => {
   }
 })
 
-cluster.start(pushLog)
+cluster.start(pushLog, () => clients.size > 0)
 setInterval(() => void tick(), 2000)
 setInterval(() => broadcast('ping', { now: Date.now() }), 15_000).unref()
 server.listen(PORT, () => console.log(`portfolio-api on :${PORT} (${process.env.CLUSTER === 'fake' ? 'fake cluster' : 'kubernetes'})`))

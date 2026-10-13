@@ -1,4 +1,5 @@
-# The database the site depends on. Backs up every 5 minutes, so a deletion loses at most ~5 minutes of visits.
+# The database the site depends on. Backs up every 10 minutes, so a deletion loses at most ~10 minutes of visits.
+# Resources are small on purpose: this database holds a few rows, and it shares a tiny VM with the rest of the stack.
 apiVersion: db.harshdev.io/v1
 kind: ManagedPostgres
 metadata:
@@ -8,8 +9,11 @@ spec:
   version: "16"
   storage: 1Gi
   backupEnabled: true
-  backupSchedule: "*/5 * * * *"
+  backupSchedule: "*/10 * * * *"
   backupBackend: local
   backupRetentionDays: 1
   backupStorage: 1Gi
   autoRestore: true
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }

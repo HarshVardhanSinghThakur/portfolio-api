@@ -1,0 +1,14 @@
+# The one door from the host into the cluster: Caddy proxies to 127.0.0.1:30087. Port 30087 is not opened in the
+# firewall or the Oracle security list, so it is not reachable from the internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-api-public
+  namespace: portfolio
+spec:
+  type: NodePort
+  selector: { app: portfolio-api }
+  ports:
+    - port: 80
+      targetPort: 8787
+      nodePort: 30087

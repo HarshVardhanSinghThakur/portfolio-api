@@ -58,7 +58,10 @@ export interface VisitStore {
 // The one seam between the HTTP server and "whatever is running the database":
 // K8sCluster talks to the real operator, FakeCluster simulates it for local dev.
 export interface Cluster {
-  start(onLog: (line: LogLine) => void): void
+  // watched() says whether anyone has the live page open; a real cluster polls slowly while nobody does
+  start(onLog: (line: LogLine) => void, watched?: () => boolean): void
+  // a visitor just connected: refresh now instead of waiting for the idle poll
+  wake?(): void
   status(): DbStatus
   metrics(): Metrics
   pods(): PodInfo[]

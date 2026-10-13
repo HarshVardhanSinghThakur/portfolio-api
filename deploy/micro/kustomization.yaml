@@ -1,0 +1,19 @@
+# Overlay (on top of ../../k8s) for the single small Oracle VM. There is no ingress controller and no frontend pod here: Caddy on the host
+# terminates HTTPS for api.<domain> and forwards to the NodePort below, and the site itself lives on GitHub Pages.
+# SITE_DOMAIN is replaced by deploy/micro/portfolio-deploy.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../k8s
+  - nodeport.yaml
+patches:
+  - target: { kind: Deployment, name: portfolio-api }
+    patch: |-
+      # one replica holds the event stream and rate limits in memory: replace it in place rather than run two
+      - op: add
+        path: /spec/strategy
+        value: { type: Recreate }
+      # which web pages may call this API from a browser
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: ALLOWED_ORIGINS, value: "https://SITE_DOMAIN,https://www.SITE_DOMAIN" }

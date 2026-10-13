@@ -5,6 +5,7 @@ import type { Cluster, DbStatus, LogLine, Metrics, Phase, PodInfo, VisitStore } 
 
 const GROUP = 'db.harshdev.io'
 const VERSION = 'v1'
+const IDLE_MS = 30_000 // how often to poll while nobody is watching
 const EMPTY: Metrics = { reconciles: null, reconcileAvgMs: null, backups: null, restores: null, recoveryAvgSec: null }
 const notFound = (e: unknown) => (e as { code?: number; statusCode?: number }).code === 404 || (e as { statusCode?: number }).statusCode === 404
 
@@ -22,6 +23,10 @@ export class K8sCluster implements Cluster {
   private seenEvents: Set<string> | null = null
   private lastReconciles: number | null = null
   private busy = false
+  private watched: () => boolean = () => true
+  private hotUntil = 0
+  private lastRefresh = 0
+  private lastScrape = 0
   private ns: string
   private name: string
   private metricsUrl: string
@@ -40,23 +45,42 @@ export class K8sCluster implements Cluster {
     this.st = { name, namespace: ns, phase: 'Creating', lastBackup: null, backupCount: 0 }
   }
 
-  start(onLog: (l: LogLine) => void) {
+  // Poll every 2 s (metrics every 5 s) while someone has the page open, the database is not Running, or a
+  // visitor has just connected; otherwise only every 30 s. A quiet site then costs the API server almost nothing,
+  // which matters on a small host. The ticker below is a 1-second timer that does no Kubernetes work by itself.
+  start(onLog: (l: LogLine) => void, watched: () => boolean = () => true) {
     this.log = onLog
-    const guard = (fn: () => Promise<void>) => async () => {
-      if (this.busy) return
-      this.busy = true
-      try {
-        await fn()
-      } catch (e) {
-        console.warn('poll failed:', (e as Error).message)
-      } finally {
-        this.busy = false
-      }
-    }
-    setInterval(guard(() => this.refresh()), 2000)
-    setInterval(() => void this.scrape(), 5000)
-    void this.refresh()
+    this.watched = watched
+    const due = (last: number, fastMs: number) => Date.now() - last >= (this.hot() ? fastMs : IDLE_MS)
+    setInterval(() => {
+      if (due(this.lastRefresh, 2000)) void this.guarded()
+      if (due(this.lastScrape, 5000)) void this.scrape()
+    }, 1000)
+    void this.guarded()
     void this.scrape()
+  }
+
+  wake() {
+    this.hotUntil = Date.now() + 60_000
+    void this.guarded()
+    void this.scrape()
+  }
+
+  private hot() {
+    return this.watched() || this.st.phase !== 'Running' || Date.now() < this.hotUntil
+  }
+
+  private async guarded() {
+    if (this.busy) return
+    this.busy = true
+    this.lastRefresh = Date.now()
+    try {
+      await this.refresh()
+    } catch (e) {
+      console.warn('poll failed:', (e as Error).message)
+    } finally {
+      this.busy = false
+    }
   }
 
   status() {
@@ -76,6 +100,7 @@ export class K8sCluster implements Cluster {
     // The volume is protected while a pod uses it, so remove the pod too; the StatefulSet recreates it.
     await this.core.deleteNamespacedPod({ name: `${this.name}-0`, namespace: this.ns, gracePeriodSeconds: 0 })
     this.log({ level: 'error', text: `pvc/${this.name}-data deleted` })
+    this.wake() // follow the recovery closely even if nobody has the page open
   }
 
   private async refresh() {
@@ -136,6 +161,7 @@ export class K8sCluster implements Cluster {
   }
 
   private async scrape() {
+    this.lastScrape = Date.now()
     try {
       const res = await fetch(this.metricsUrl, { signal: AbortSignal.timeout(2000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)

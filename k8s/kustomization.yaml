@@ -1,0 +1,5 @@
+# Base for the overlays in ./micro. (Applying k8s/portfolio-api.yaml directly, as the laptop cluster does, still works.)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - portfolio-api.yaml

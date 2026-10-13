@@ -1,0 +1,13 @@
+# Helm values for the operator on the single small Oracle VM. portfolio-deploy adds the image names and tag.
+# These are deployment settings only; the operator and chart are used as they are.
+
+# Seconds between the operator's own drift checks. Deleting the database is noticed by the operator within this
+# time (the site shows the outage at once, from the API). Raise it to save CPU, lower it for a faster restore start.
+reconcileInterval: 30
+
+# Shorter than the site's 5-minute delete cooldown, so a second deletion is restored as well.
+autoRestoreDedupMinutes: 2
+
+# There is no Prometheus Operator here; the API reads the metrics endpoint directly.
+serviceMonitor:
+  enabled: false

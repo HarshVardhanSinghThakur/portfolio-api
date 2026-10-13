@@ -1,0 +1,2 @@
+# The deploy script runs on Linux: a Windows (CRLF) line ending would break its #! line.
+deploy/micro/portfolio-deploy text eol=lf
