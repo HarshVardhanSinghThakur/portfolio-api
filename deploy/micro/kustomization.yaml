@@ -17,3 +17,14 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: { name: ALLOWED_ORIGINS, value: "https://SITE_DOMAIN,https://www.SITE_DOMAIN" }
+      # This VM gets ~1/8 of a core (80% CPU steal), so the default 1 s probe timeout kills a healthy API.
+      # startupProbe holds liveness off while the node boots (up to 10 min); the other two tolerate slow answers.
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value: { httpGet: { path: /api/health, port: 8787 }, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 60 }
+      - op: add
+        path: /spec/template/spec/containers/0/readinessProbe
+        value: { httpGet: { path: /api/health, port: 8787 }, periodSeconds: 15, timeoutSeconds: 10, failureThreshold: 4 }
+      - op: add
+        path: /spec/template/spec/containers/0/livenessProbe
+        value: { httpGet: { path: /api/health, port: 8787 }, periodSeconds: 30, timeoutSeconds: 10, failureThreshold: 6 }
